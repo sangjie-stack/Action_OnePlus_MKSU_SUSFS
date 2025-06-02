@@ -1,0 +1,62 @@
+name: Build OnePlus Ace5 Kernel with SukiSU
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        submodules: recursive
+
+    - name: Set up environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
+        mkdir -p ~/bin
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+        chmod a+x ~/bin/repo
+        echo 'export PATH=~/bin:$PATH' >> ~/.bashrc
+        source ~/.bashrc
+
+    - name: Set up toolchain
+      run: |
+        git clone --depth=1 https://gitlab.com/ElectroPerf/atom-x-clang.git clang
+        export PATH="$(pwd)/clang/bin:$PATH"
+        export KBUILD_COMPILER_STRING="$(./clang/bin/clang --version | head -n 1 | perl -pe 's/$http.*?$//gs' | sed -e 's/  */ /g' -e 's/[[:space:]]*$//')"
+
+    - name: Build kernel
+      run: |
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export KBUILD_BUILD_USER="github"
+        export KBUILD_BUILD_HOST="github"
+        export KERNEL_DIR=$(pwd)
+        export OUT_DIR=$KERNEL_DIR/out
+        
+        # Ace5 specific config
+        make O=$OUT_DIR oneplus_sm8650_defconfig
+        make -j$(nproc --all) O=$OUT_DIR \
+            CC="clang" \
+            CLANG_TRIPLE="aarch64-linux-gnu-" \
+            CROSS_COMPILE="aarch64-linux-gnu-" \
+            CROSS_COMPILE_ARM32="arm-linux-gnueabi-"
+
+    - name: Package artifacts
+      run: |
+        mkdir -p kernel_output
+        cp out/arch/arm64/boot/Image.gz-dtb kernel_output/
+        cd kernel_output
+        zip -r kernel.zip .
+        
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: OnePlus-Ace5-Kernel
+        path: kernel_output/kernel.zip
