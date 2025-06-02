@@ -1,0 +1,70 @@
+name: Build GKI Kernel for OnePlus Ace 5 (SM8650)
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    env:
+      KERNEL_DIR: kernel_platform/msm-kernel
+      CLANG_DIR: kernel_platform/prebuilts/clang/host/linux-x86
+      BUILD_TOOLS_DIR: kernel_platform/prebuilts/build-tools
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential flex git libssl-dev libelf-dev
+
+    - name: Build GKI Kernel
+      run: |
+        # 设置环境变量
+        export PATH=$PWD/$BUILD_TOOLS_DIR/linux-x86/bin:$PATH
+        export PATH=$PWD/$CLANG_DIR/clang-r450784d/bin:$PATH
+        
+        # 进入内核目录
+        cd $KERNEL_DIR
+        
+        # 清理构建环境
+        make clean && make mrproper
+        
+        # 生成GKI配置
+        make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            LD=ld.lld gki_defconfig
+        
+        # 构建内核
+        make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            LD=ld.lld -j$(nproc --all)
+        
+        # 构建模块
+        make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            LD=ld.lld modules -j$(nproc --all)
+        
+        # 打包内核镜像
+        cp out/arch/arm64/boot/Image.gz-dtb ../anykernel/
+        cd ../anykernel
+        zip -r9 ../flashable-anykernel.zip *
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: gki-kernel-build
+        path: |
+          kernel_platform/msm-kernel/out/arch/arm64/boot/Image.gz-dtb
+          flashable-anykernel.zip
